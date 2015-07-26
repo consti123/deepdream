@@ -8,27 +8,11 @@ import matplotlib.pyplot as plot
 # TODO get CUDA running again and run caffe on GPU!!
 import caffe
 
-def asrgb(im):
-    assert len(im.shape) == 3
-    im_rgb = np.zeros(im.shape)
-    im_rgb[:,:,0] = im[:,:,2]
-    im_rgb[:,:,1] = im[:,:,0]
-    im_rgb[:,:,2] = im[:,:,1]
-    return im_rgb
-
 def show_img(im):
+    im = np.uint8(np.clip(im, 0, 255))
     plot.imshow(im, interpolation = 'nearest')
     plot.show()
 
-def showarray(a, fmt='jpeg'):
-    a = np.uint8(np.clip(a, 0, 255))
-    show_img( a )
-
-def save_array(img, path):
-    img = np.uint8(np.clip(img, 0, 255))
-    plot.figure()
-    plot.imshow(img, interpolation = 'nearest')
-    plot.savefig(path)
 
 # a couple of utility functions for converting to and from Caffe's input image layout
 def preprocess(net, img):
@@ -106,7 +90,7 @@ def deepdream(
                 if save_step:
                     path = "experiment/" + end + "_octave_" + str(octave) + "iteration_"
                     path += str(i) + ".jpg"
-                    save_array(vis, path)
+                    PIL.Image.fromarray( np.uint8(vis) ).save(path)
                 print octave, i, end, vis.shape
 
         # extract details produced on the current octave
@@ -119,6 +103,7 @@ def deepdream_single_frame(net, img):
     print net.blobs.keys()
     #__= deepdream(net, img)
     _=deepdream(net, img, end='inception_3b/5x5_reduce', save_step = True)
+
 
 def deepdream_multi_frame(net, img):
     frame = img
@@ -138,6 +123,28 @@ def deepdream_multi_frame(net, img):
         PIL.Image.fromarray(np.uint8(frame)).save("frames/%04d.jpg"%frame_i)
         frame = nd.affine_transform(frame, [1-s,1-s,1], [h*s/2,w*s/2,0], order=1)
         frame_i += 1
+
+
+def control_the_dream(net):
+    guide = np.float32(PIL.Image.open('flowers.jpg'))
+    end = 'inception_3b/output'
+    h, w = guide.shape[:2]
+    src, dst = net.blobs['data'], net.blobs[end]
+    src.reshape(1,3,h,w)
+    src.data[0] = preprocess(net, guide)
+    net.forward(end=end)
+    guide_features = dst.data[0].copy()
+
+    def objective_guide(dst):
+        x = dst.data[0].copy()
+        y = guide_features
+        ch = x.shape[0]
+        x = x.reshape(ch,-1)
+        y = y.reshape(ch,-1)
+        A = x.T.dot(y) # compute the matrix of dot-products with guide features
+        dst.diff[0].reshape(ch,-1)[:] = y[:,A.argmax(1)] # select ones that match best
+
+    _=deepdream(net, img, end=end, objective=objective_guide)
 
 
 if __name__ == '__main__':
